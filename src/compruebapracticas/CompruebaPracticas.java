@@ -13,6 +13,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import static java.nio.file.Files.lines;
@@ -116,7 +117,7 @@ public class CompruebaPracticas {
             for (String fichero : optionalFiles) {
                 f = new File(path + fichero);
                 if (f.exists()) {
-                    bw.write("Además ha añadido el fichero "+ fichero + "\n");
+                    bw.write("Además ha añadido el fichero " + fichero + "\n");
                 }
             }
         }
@@ -258,13 +259,14 @@ public class CompruebaPracticas {
 
     }
 
-    private static void compruebaTestsC(BufferedWriter bw, String path) throws IOException, InterruptedException {
-
+    private static void compruebaTestsC(String reportPath, String path, String dockerFilesPath) throws IOException, InterruptedException {
+        FileWriter fw = new FileWriter(reportPath, true);
+        BufferedWriter bw = new BufferedWriter(fw);
         Runtime rt = Runtime.getRuntime();
         bw.write("******************************************************\n");
         bw.write("Parte C++\n");
         bw.write("******************************************************\n");
-
+        bw.close();
         for (String folder : cTestsFolders) {
             ArrayList<String> files = getFilesFromFolderTestsExecute(folder);
             String command = "g++ ";
@@ -272,11 +274,13 @@ public class CompruebaPracticas {
                 command = command + path.substring(0, path.lastIndexOf("/")) + file + " ";
             }
             command = command + " -o " + path + folder + "/a.out";
+            fw = new FileWriter(reportPath, true);
+            bw = new BufferedWriter(fw);
             //System.out.println(command);
             bw.write("--------------------------------------\n");
             bw.write("Tests en " + folder + "\n");
             bw.write("--------------------------------------\n");
-
+            bw.close();
             Process pr = rt.exec(command);
             BufferedReader input = new BufferedReader(new InputStreamReader(pr.getInputStream()));
             String line = null;
@@ -284,40 +288,82 @@ public class CompruebaPracticas {
 
             }
 
-            if ((new File(path + folder + "/a.out")).exists()) {
+            if ((new File(path + folder + "/a.out")).exists() && (new File(path + folder + "/a.out")).canExecute()) {
 
                 try {
-                    pr = rt.exec(path + folder + "/a.out");
+                    bw.close();
+                    // We copy the files to build and execute the container
+                    Files.copy(Paths.get(dockerFilesPath + "DockerfileC"), Paths.get(path + folder + "/Dockerfile"), REPLACE_EXISTING);
+                    Files.copy(Paths.get(dockerFilesPath + "docker-run-timeout-C.sh"), Paths.get(path + folder + "/docker-run-timeout.sh"), REPLACE_EXISTING);
+                    // We build the container
+                    command = "docker build -t prueba " + path + folder + "/ ";
+                    pr = rt.exec(command);
+                    pr.waitFor();
+                    // We run the container
+                    command = path + folder + "/docker-run-timeout.sh 5s " + path;
+                    pr = rt.exec(command);
+                    pr.waitFor();
 
-                    input = new BufferedReader(new InputStreamReader(pr.getInputStream()));
+                    /*input = new BufferedReader(new InputStreamReader(pr.getInputStream()));
                     String line2 = null;
+                    String res = "";
                     while ((line2 = input.readLine()) != null) {
-                        bw.write(line2 + "\n");
-                    }
+                        res = res + (line2 + "\n");
+                        //bw.write(line2 + "\n");
+                    }*/
                 } catch (IOException e) {
+                    System.out.println("Error copiando los ficheros");
 
                 }
             } else {
+                fw = new FileWriter(reportPath, true);
+                bw = new BufferedWriter(fw);
                 bw.write("Se produjeron errores de compilación con los tests\n");
+                bw.close();
             }
-
+            fw = new FileWriter(reportPath, true);
+            bw = new BufferedWriter(fw);
             bw.write("\n\n");
+            bw.close();
 
         }
 
     }
 
-    private static void compruebaTestsJava(BufferedWriter bw, String path) throws IOException, InterruptedException {
+    private static void createDockerFileJava(String path) throws IOException {
+        FileWriter fw = new FileWriter(path + "/Dockerfile", false);
+        BufferedWriter bw = new BufferedWriter(fw);
+        bw.write("FROM openjdk\n");
+        bw.write("ADD junit4.jar junit4.jar\n");
+        bw.write("ADD hamcrest-core.jar hamcrest-core.jar\n");
+        File dir = new File(path +"/");
 
+        for (File file : dir.listFiles()) {
+            if (file.getName().endsWith(".class")) {
+                bw.write("ADD \'" + file.getName() + "\' \'" + file.getName() + "\'\n");
+            }
+        }
+
+        bw.close();
+
+    }
+
+    private static void compruebaTestsJava(String reportPath, String path, String dockerFilesPath) throws IOException, InterruptedException {
+        FileWriter fw = new FileWriter(reportPath, true);
+        BufferedWriter bw = new BufferedWriter(fw);
         Runtime rt = Runtime.getRuntime();
         bw.write("******************************************************\n");
         bw.write("Parte Java\n");
         bw.write("******************************************************\n");
+        bw.close();
         for (String folder : javaTestsFolders) {
             ArrayList<String> files = getFilesFromFolderTestsExecute(folder);
             ArrayList<String> filesCompile = getFilesFromFolderTestsCompile(folder);
             if (files.size() != 1) {
+                fw = new FileWriter(reportPath, true);
+                bw = new BufferedWriter(fw);
                 bw.write("Se produjeron errores de compilación con los tests\n");
+                bw.close();
             } else {
                 String command = "javac -encoding ISO-8859-1 -cp :/usr/share/java/junit4.jar ";
                 for (String file : filesCompile) {
@@ -327,45 +373,68 @@ public class CompruebaPracticas {
                 Process pr = rt.exec(command);
                 BufferedReader input = new BufferedReader(new InputStreamReader(pr.getErrorStream()));
                 String line = null;
+                fw = new FileWriter(reportPath, true);
+                bw = new BufferedWriter(fw);
                 while ((line = input.readLine()) != null) {
                     bw.write(line + "\n");
                 }
-
-                command = "java -cp " + path + folder
-                        + "/:/usr/share/java/junit4.jar org.junit.runner.JUnitCore "
-                        + files.get(0).substring(files.get(0).lastIndexOf("/") + 1, files.get(0).indexOf("."));
 
                 //System.out.println(command);
                 bw.write("--------------------------------------\n");
                 bw.write("Tests en " + folder + "\n");
                 bw.write("--------------------------------------\n");
+                bw.close();
 
+                /*pr = rt.exec(command);
+                command = "java -cp " + path + folder
+                        + "/:/usr/share/java/junit4.jar org.junit.runner.JUnitCore "
+                        + files.get(0).substring(files.get(0).lastIndexOf("/") + 1, files.get(0).indexOf("."));*/
+                // We copy and create the files to build and execute the container
+                createDockerFileJava(path + folder);
+                Files.copy(Paths.get(dockerFilesPath + "junit4.jar"), Paths.get(path + folder + "/junit4.jar"), REPLACE_EXISTING);
+                Files.copy(Paths.get(dockerFilesPath + "hamcrest-core.jar"), Paths.get(path + folder + "/hamcrest-core.jar"), REPLACE_EXISTING);
+                Files.copy(Paths.get(dockerFilesPath + "docker-run-timeout-Java.sh"), Paths.get(path + folder + "/docker-run-timeout.sh"), REPLACE_EXISTING);
+                // We build the container
+                command = "docker build -t junit4 " + path + folder + "/ ";
                 pr = rt.exec(command);
+                pr.waitFor();
+                // We run the container
+                command = path + folder + "/docker-run-timeout.sh 5s " + files.get(0).substring(files.get(0).lastIndexOf("/") + 1, files.get(0).indexOf(".")) + " " + path;
+                //System.out.println(command);
+                pr = rt.exec(command);
+                pr.waitFor();
+
                 input = new BufferedReader(new InputStreamReader(pr.getInputStream()));
                 line = null;
                 while ((line = input.readLine()) != null) {
                     bw.write(line + "\n");
                 }
 
-                bw.write("\n\n");
             }
+            fw = new FileWriter(reportPath, true);
+            bw = new BufferedWriter(fw);
+            bw.write("\n\n");
+            bw.close();
         }
 
     }
 
-    private static void compruebaTests(BufferedWriter bw, String path) throws IOException, InterruptedException {
+    private static void compruebaTests(String reportPath, String path, String dockerFilesPath) throws IOException, InterruptedException {
+        FileWriter fw = new FileWriter(reportPath, true);
+        BufferedWriter bw = new BufferedWriter(fw);
         bw.write("\n\n\n******************************************************\n");
         bw.write("Comprobando los tests\n");
         bw.write("******************************************************\n");
-        compruebaTestsC(bw, path);
-        compruebaTestsJava(bw, path);
+        bw.close();
+        compruebaTestsC(reportPath, path, dockerFilesPath);
+        compruebaTestsJava(reportPath, path, dockerFilesPath);
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
         // El path del proyecto debe contener dos carpetas. Una de configuración
         // llamada Config y otra que contendrá los tests llamada Tests.
-        String projectPath = "/home/jonathan/NetBeansProjects/CompruebaPracticas/";
+        String projectPath = "/home/joheras/NetBeansProjects/CompruebaPracticas0106/";
 
         // La actividad indica el nombre de la actividad a evaluar.
         String actividad = "Practicas0106";
@@ -379,6 +448,7 @@ public class CompruebaPracticas {
         String structurePath = configPath + "structure.txt";
         String optionalFilesPath = configPath + "optionalfiles.txt";
         String testFilesPath = configPath + "testfiles.txt";
+        String dockerFilesPath = projectPath + "DockerFiles/";
 
         // Leemos la estructura de ficheros, la lista de ficheros opcionales y
         // la lista de ficheros de tests y lo almacenamos en las respectivas
@@ -403,7 +473,7 @@ public class CompruebaPracticas {
         // La carpeta que queremos evaluar, y donde se guardará el informe.
         // Cuando tengamos un conjunto de ficheros habrá que modificar esto para
         // que se evaluen todos los envíos.
-        String path = "/home/jonathan/Escritorio/MataMartínezGadea/";
+        String path = "/home/joheras/Escritorio/MataMartínezGadea/";
         String reportPath = path + "informe.txt";
 
         FileWriter fw = new FileWriter(reportPath, true);
@@ -414,10 +484,11 @@ public class CompruebaPracticas {
         System.out.println("Comprobando si los ficheros compilan");
         compilaFolders(bw, path);
         System.out.println("Comprobando si pasan los tests");
+        bw.close();
         // Primero copiamos los ficheros de tests
         copyTestFiles(testFolderPath, path);
-        compruebaTests(bw, path);
-        bw.close();
+        compruebaTests(reportPath, path, dockerFilesPath);
+
     }
 
 }

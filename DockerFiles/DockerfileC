@@ -1,0 +1,3 @@
+FROM ubuntu
+RUN mkdir /data
+ADD a.out /home/a.out
